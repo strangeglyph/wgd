@@ -1,0 +1,10 @@
+.gradle
+.idea
+build
+gradle
+gradlew.bat
+gradlew
+out
+config.properties
+*.ics
+wgd.sqlite
