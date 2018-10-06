@@ -5,9 +5,9 @@ import me.ivmg.telegram.Bot
 import me.ivmg.telegram.bot
 import me.ivmg.telegram.dispatch
 import me.ivmg.telegram.dispatcher.command
-import me.ivmg.telegram.dispatcher.text
 import org.apache.commons.lang3.SystemUtils
 import org.joda.time.DateTime
+import org.joda.time.DurationFieldType
 import org.joda.time.Interval
 
 /**
@@ -30,18 +30,7 @@ class Service(val config: ServiceConf) {
         this.bot = bot {
             token = config.telegramToken
             dispatch {
-                text { bot, update ->
-                    print("Got a message: ${update.message}")
-                    if (update.message == null) return@text
-                    if (update.message!!.chat.id != config.telegramChat) return@text
-
-                    val msg =
-                        if (update.message!!.text != null) "Received ${update.message!!.text}"
-                        else "Okay"
-
-                    notifyChat(msg)
-                }
-                command("id") { bot, update ->
+                command("id") { _, update ->
                     notifyChat("Chat id: ${update.message?.chat?.id}")
                 }
             }
@@ -103,10 +92,15 @@ class Service(val config: ServiceConf) {
     }
 
     fun createTask(desc: String, dueDate: DateTime, interval: Int, participatingUsers: List<String>) {
-        val timeToReminder = if (dueDate.isBeforeNow) 0 else Interval(DateTime.now(), dueDate).toDurationMillis()
+        var dueDate = dueDate
+        while (dueDate.isBeforeNow) {
+            dueDate = dueDate.withFieldAdded(DurationFieldType.days(), interval)
+        }
+
+        val timeToReminder = Interval(DateTime.now(), dueDate).toDurationMillis()
         val timeToNextTask = Database.timeToNextTask()
 
-        val shouldStartOneOffThread = dueDate.isBeforeNow || (timeToNextTask != null && timeToReminder < timeToNextTask)
+        val shouldStartOneOffThread = timeToNextTask != null && timeToReminder < timeToNextTask
 
         Database.createTask(desc, dueDate, interval, participatingUsers)
 
