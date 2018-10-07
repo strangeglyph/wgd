@@ -1,11 +1,9 @@
 
 import biweekly.ICalendar
-import com.sun.akuma.Daemon
 import me.ivmg.telegram.Bot
 import me.ivmg.telegram.bot
 import me.ivmg.telegram.dispatch
 import me.ivmg.telegram.dispatcher.command
-import org.apache.commons.lang3.SystemUtils
 import org.joda.time.DateTime
 import org.joda.time.DurationFieldType
 import org.joda.time.Interval
@@ -42,27 +40,10 @@ class Service(val config: ServiceConf) {
     }
 
     fun execute() {
-        if (SystemUtils.IS_OS_LINUX || SystemUtils.IS_OS_MAC || SystemUtils.IS_OS_SOLARIS) {
-            daemonize()
-        } else {
-            println("Daemonization not supported on this operating system")
-            println("Service will run in foreground")
-        }
-
         Thread(Runnable { bot.startPolling() }, "telegram").start()
         taskChecker.start()
         reminderChecker.start()
         running = true
-    }
-
-    private fun daemonize() {
-        val daemon = Daemon()
-        if (daemon.isDaemonized) {
-            init()
-        } else {
-            println("Forking to background...")
-            daemon.daemonize()
-        }
     }
 
     private fun init() {
