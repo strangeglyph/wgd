@@ -5,8 +5,6 @@ import me.ivmg.telegram.bot
 import me.ivmg.telegram.dispatch
 import me.ivmg.telegram.dispatcher.command
 import org.joda.time.DateTime
-import org.joda.time.DurationFieldType
-import org.joda.time.Interval
 
 /**
  * @author µ
@@ -20,9 +18,9 @@ class Service(val config: ServiceConf) {
     private val bot: Bot
     private var running = false
 
-    private val taskChecker = scheduleTaskTask()
+    private val taskChecker = scheduleTaskThread()
 
-    private val reminderChecker = scheduleReminderTask()
+    private val reminderChecker = scheduleReminderThread()
 
     init {
         this.bot = bot {
@@ -46,57 +44,27 @@ class Service(val config: ServiceConf) {
         running = true
     }
 
-    private fun init() {
-        println("Forked to background")
-    }
-
     fun importReminders(ical: ICalendar) {
-        var shouldStartOneOffThread = false
-        val timeToNextReminder = Database.timeToNextReminder()
-
         for (event in ical.events) {
             if (DateTime(event.dateStart.value).isBeforeNow) continue
-
-            val timeToReminder = Interval(DateTime.now(), DateTime(event.dateStart.value)).toDurationMillis()
-            if (timeToNextReminder != null && timeToReminder < timeToNextReminder) {
-                shouldStartOneOffThread = true
-            }
             Database.createReminder(event.summary.value, DateTime(event.dateStart.value))
-        }
-
-        if (running && shouldStartOneOffThread) {
-            val t = Thread { oneTimeReminderCheck() }
-            t.name = "reminder one-off"
-            t.isDaemon = true
-            t.start()
         }
     }
 
     fun createTask(desc: String, dueDate: DateTime, interval: Int, participatingUsers: List<String>) {
-        var dueDate = dueDate
-        while (dueDate.isBeforeNow) {
-            dueDate = dueDate.withFieldAdded(DurationFieldType.days(), interval)
-        }
-
-        val timeToReminder = Interval(DateTime.now(), dueDate).toDurationMillis()
-        val timeToNextTask = Database.timeToNextTask()
-
-        val shouldStartOneOffThread = timeToNextTask != null && timeToReminder < timeToNextTask
-
         Database.createTask(desc, dueDate, interval, participatingUsers)
-
-        if (running && shouldStartOneOffThread) {
-            val t = Thread { oneTimeTaskCheck() }
-            t.name = "task one-off"
-            t.isDaemon = true
-            t.start()
-        }
     }
 
-    private fun scheduleReminderTask(): Thread {
+    private fun scheduleReminderThread(): Thread {
         val reminderChecker = Thread {
             while (true) {
-                oneTimeReminderCheck()
+                Thread.sleep(5 * 60 * 1000)
+                val reminders = Database.remindersWithin(ALERT_TIME)
+                for (reminder in reminders) {
+                    println("Reminder due: ${reminder.desc}")
+                    notifyChat("Reminder: ${reminder.desc}")
+                    Database.removeReminder(reminder)
+                }
             }
         }
         reminderChecker.name = "reminder"
@@ -105,46 +73,23 @@ class Service(val config: ServiceConf) {
         return reminderChecker
     }
 
-    private fun scheduleTaskTask(): Thread {
+    private fun scheduleTaskThread(): Thread {
         val taskChecker = Thread {
             while (true) {
-                oneTimeTaskCheck()
+                Thread.sleep(5 * 60 * 1000)
+                val tasks = Database.tasksWithin(ALERT_TIME)
+                for (task in tasks) {
+                    val respUser = Database.nextUserResponsibleFor(task)
+                    println("Task due: ${respUser} for ${task.desc}")
+                    notifyChat("Task due: ${respUser.name} for ${task.desc}")
+                    Database.updateTask(task, respUser)
+                }
             }
         }
         taskChecker.name = "task"
         taskChecker.isDaemon = true
 
         return taskChecker
-    }
-
-    private fun oneTimeReminderCheck() {
-        val timeToNextReminder = Database.timeToNextReminder()
-        if (timeToNextReminder == null) {
-            Thread.sleep(60 * 1000)
-        } else if (timeToNextReminder > ALERT_TIME) {
-            Thread.sleep(timeToNextReminder - ALERT_TIME)
-        }
-
-        for (reminder in Database.remindersWithin(ALERT_TIME)) {
-            notifyChat("Reminder: ${reminder.desc}")
-            Database.removeReminder(reminder)
-        }
-    }
-
-    private fun oneTimeTaskCheck() {
-        val timeToNextTask = Database.timeToNextTask()
-        if (timeToNextTask == null) {
-            Thread.sleep(60 * 1000) // 1 min
-            return
-        } else if (timeToNextTask > ALERT_TIME) {
-            Thread.sleep(timeToNextTask - ALERT_TIME)
-        }
-
-        for (task in Database.tasksWithin(ALERT_TIME)) {
-            val respUser = Database.nextUserResponsibleFor(task)
-            notifyChat("Task due: ${respUser.name} for ${task.desc}")
-            Database.updateTask(task, respUser)
-        }
     }
 }
 
